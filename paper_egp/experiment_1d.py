@@ -1,29 +1,29 @@
-import sys
-sys.path.insert(0, '/home/emmanuel/projects/gp_error')
-sys.path.insert(0, '/home/emmanuel/code/kernellib')
-
 import warnings
 warnings.simplefilter('ignore', category=[DeprecationWarning, FutureWarning])
 
 
 import numpy as np
 import time
-import pandas as pd
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel as C 
-from sklearn.cluster import KMeans
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from kernellib.data import example_error_1d
-from kernellib.utils import r_assessment
-from kernellib.visualization import plot_gp
-from egp import NIGP
-from gp_error.gp_extras import HeteroscedasticKernel
+from paper_egp.utils import plot_gp, r_assessment
+from paper_egp.egp import NIGP
 from scipy import interpolate
-
-import matplotlib
-matplotlib.use('agg')
 import matplotlib.pyplot as plt
-plt.style.use('ggplot')
+
+try:
+    from gp_extras import HeteroscedasticKernel
+    from sklearn.cluster import KMeans
+    extras_install = True
+except ImportError:
+    print("GP Extras file not found. Won't do Example")
+    extras_install = False
+
+
+
+
 
 
 class Example1D(object):
@@ -36,7 +36,7 @@ class Example1D(object):
         self.models_fitted = True
         self.empirical_variance_fitted = True
         self.average_scores_fitted = None
-        self.fig_save_1d = "/home/emmanuel/projects/error_propagation/figures/paper/experiment_1d/"
+        self.fig_save_1d = "/figures/experiment_1d"
         self.fig_emp_error = "/home/emmanuel/projects/error_propagation/figures/paper/experiment_1d/"
 
     def get_data(self, func=None, x_error=None):
@@ -91,9 +91,6 @@ class Example1D(object):
                 'rmse': rmse,
                 'r2': r2
             }, ignore_index=True)
-
-        # df_path = '/home/emmanuel/projects/2018_igarss/data/results/1d_example/1d_gp.pckl'
-        # df.to_pickle(df_path)
 
         self.results = df
         self.models = self.models
@@ -349,12 +346,14 @@ def get_models( xtrain, ytrain, x_cov=None):
     # =======================
     # Heteroscedastic Noise
     # =======================
-    print('Fitting GP with Heteroscedastic Kernel...')
-    prototypes = KMeans(n_clusters=5).fit(xtrain).cluster_centers_
-    kernel = C() * RBF() + HeteroscedasticKernel.construct(prototypes)
-    hetero = GaussianProcessRegressor(kernel=kernel, normalize_y=True, n_restarts_optimizer=10)
-    hetero.fit(xtrain, ytrain)
-    gp_models['hetero'] = hetero
+
+    if extras_install:
+        print('Fitting GP with Heteroscedastic Kernel...')
+        prototypes = KMeans(n_clusters=5).fit(xtrain).cluster_centers_
+        kernel = C() * RBF() + HeteroscedasticKernel.construct(prototypes)
+        hetero = GaussianProcessRegressor(kernel=kernel, normalize_y=True, n_restarts_optimizer=10)
+        hetero.fit(xtrain, ytrain)
+        gp_models['hetero'] = hetero
 
     return gp_models
 
@@ -495,7 +494,85 @@ def get_average_error(abs_error, squared_error, mae_score, mse_score):
     return avg_abs_error, avg_squared_error, avg_mae_score, avg_mse_score
 
 
+def example_error_1d(func=1, x_error=0.3):
+    seed = 123
+    rng = np.random.RandomState(seed=seed)
+
+    # sample data parameters
+    n_train, n_test, n_trial = 60, 100, 2000
+    sigma_y = 0.05
+    x_cov = x_error
+    x_min, x_max = -10, 10
+
+    # real function
+    if func == 1:
+        f = lambda x: np.sin(1.0 * np.pi / 1.6 * np.cos(5 + .5 * x))
+    elif func == 2:
+        f = lambda x: np.sinc(x)
+
+    else:
+        f = lambda x: np.sin(2. * x) + np.exp(0.2 * x)
+
+    # Training add x, y = f(x)
+    x = np.linspace(x_min, x_max, n_train + n_test)
+
+    print(n_train)
+    x, xs, = train_test_split(x, train_size=n_train, random_state=seed)
+
+    # add noise
+    y = f(x)
+    x_train = x + x_cov * rng.randn(n_train)
+    y_train = f(x) + sigma_y * rng.randn(n_train)
+
+    x_train, y_train = x_train[:, np.newaxis], y_train[:, np.newaxis]
+
+    # -----------------
+    # Testing Data
+    # -----------------
+
+    ys = f(xs)
+
+    # Add noise
+    x_test = xs + x_cov * rng.randn(n_test)
+    y_test = ys
+
+    x_test, y_test = x_test[:, np.newaxis], y_test[:, np.newaxis]
+
+    # -------------------
+    # Plot Points
+    # -------------------
+    x_plot = np.linspace(x_min, x_max, n_test)[:, None]
+    y_plot = f(x_plot)
+
+    X = {
+        'train': x_train,
+        'test': x_test,
+        'plot': x_plot
+    }
+    y = {
+        'train': y_train,
+        'test': y_test,
+        'plot': y_plot
+    }
+
+    error_params = {
+        'x': x_cov,
+        'y': sigma_y,
+        'f': f
+    }
+
+    return X, y, error_params
+
+
+
+
 def main():
+
+    from paper_egp.experiment_1d import Example1D as Experiment1D
+    error_exp = Experiment1D(func=1, x_cov=0.3)
+
+    error_exp.fit_gps()
+
 
     pass
 

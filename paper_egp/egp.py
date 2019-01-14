@@ -1,6 +1,3 @@
-import sys
-sys.path.insert(0, '/home/emmanuel/code/kernellib')
-
 import warnings
 from operator import itemgetter
 import numba
@@ -16,7 +13,6 @@ from sklearn.utils import check_random_state
 from sklearn.utils.validation import check_X_y, check_array
 from sklearn.utils.deprecation import deprecated
 
-# from kernellib.derivatives import ard_derivative_numba
 
 
 
