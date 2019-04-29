@@ -10,6 +10,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from paper_egp.utils import plot_gp, r_assessment
 from paper_egp.egp import NIGP
+
 from scipy import interpolate
 import matplotlib.pyplot as plt
 
@@ -22,6 +23,9 @@ except ImportError:
     extras_install = False
 
 
+
+
+    
 
 
 

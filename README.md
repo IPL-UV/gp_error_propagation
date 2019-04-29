@@ -10,7 +10,7 @@ Gaussian   Processes   (GPs)   are   a   class   of   kernelmethods   that   hav
 ### Concept
 
 <p align="center">
-  <img src="figures/conceptual/concept_map.png" />
+  <img src="https://raw.githubusercontent.com/IPL-UV/gp_error_propagation/master/figures/conceptual/concept_map.png" />
   
 </p>
 

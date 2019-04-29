@@ -1,3 +1,6 @@
+import sys
+sys.path.insert(0, '/home/emmanuel/code/kernellib')
+
 import warnings
 from operator import itemgetter
 import numba
@@ -13,10 +16,187 @@ from sklearn.utils import check_random_state
 from sklearn.utils.validation import check_X_y, check_array
 from sklearn.utils.deprecation import deprecated
 
+# from kernellib.derivatives import ard_derivative_numba
 
 
+class EEGP(GaussianProcessRegressor):
+    def __init__(self, x_variance=None, n_restarts=5, kernel=None):
+        if kernel is None:
+            kernel = C() * RBF() + WhiteKernel()
 
-class NIGP(BaseEstimator, RegressorMixin):
+        super().__init__(
+            kernel=kernel,
+            n_restarts_optimizer=n_restarts,
+            normalize_y=True,
+            random_state=123,
+        )
+
+        self.x_variance = self._build_variance(x_variance)
+        self._vK_inv = None
+    
+    def _build_variance(self, x_variance=None):
+        # Fix the Variance of X
+        if x_variance is None:
+            x_variance = 0.0
+        if isinstance(x_variance, float):
+            x_variance = np.array(x_variance).reshape(1, -1)
+        if np.ndim(x_variance) < 2:
+            x_variance = np.diag(x_variance)
+        return x_variance
+    
+    def _build_variance_weights(self):
+
+        #======================================
+        # Step I: Take Derivative
+        #======================================
+
+        # Calculate the Derivative for RBF Kernel
+        self.derivative = rbf_derivative(
+            self.X_train_, self.X_train_, 
+            self.kernel_(self.X_train_, self.X_train_),
+            self.alpha_, self.kernel_.get_params()['k1__k2__length_scale']
+        )
+
+        # Calculate the derivative term
+        self.derivative_term = np.dot(self.derivative, np.dot(self.x_variance, self.derivative.T))
+
+        #======================================
+        # Step II: Find Weights
+        #======================================
+
+        K = self.kernel_(self.X_train_)
+        K[np.diag_indices_from(K)] += self.alpha 
+        K += self.derivative_term
+
+        try:
+            self._vL = cholesky(K, lower=True)
+            
+        except np.linalg.LinAlgError as exc:
+            exc.args(f"The kernel {self.kernel_}, is not returing a "
+                     "positive definite matrix. Try gradually "
+                     "increasing the 'alpha' parameter of your GPR.") + exc.args
+            raise 
+
+        self.variance_alpha_ = cho_solve((self._vL, True), self.y_train_)
+
+        L_inv = solve_triangular(self._vL.T,
+                                    np.eye(self._vL.shape[0]))
+        self._vK_inv = L_inv.dot(L_inv.T)
+        return self
+
+    def predict(self, X, return_std=False, error_variance=False):
+        """Predict using the Gaussian process regression model
+        We can also predict based on an unfitted model by using the GP prior.
+        In addition to the mean of the predictive distribution, also its
+        standard deviation (return_std=True) or covariance (return_cov=True).
+        Note that at most one of the two can be requested.
+        Parameters
+        ----------
+        X : array-like, shape = (n_samples, n_features)
+            Query points where the GP is evaluated
+        return_std : bool, default: False
+            If True, the standard-deviation of the predictive distribution at
+            the query points is returned along with the mean.
+        return_cov : bool, default: False
+            If True, the covariance of the joint predictive distribution at
+            the query points is returned along with the mean
+        Returns
+        -------
+        y_mean : array, shape = (n_samples, [n_output_dims])
+            Mean of predictive distribution a query points
+        y_std : array, shape = (n_samples,), optional
+            Standard deviation of predictive distribution at query points.
+            Only returned when return_std is True.
+        y_cov : array, shape = (n_samples, n_samples), optional
+            Covariance of joint predictive distribution a query points.
+            Only returned when return_cov is True.
+        """
+        X = check_array(X)
+
+        K_trans = self.kernel_(X, self.X_train_)
+
+        y_mean = K_trans.dot(self.alpha_)  # Line 4 (y_mean = f_star)
+        y_mean = self._y_train_mean + y_mean  # undo normal.
+
+
+        if return_std:
+            if error_variance:
+                return y_mean, np.sqrt(self.evariance(X, K_trans))
+            else:
+                return y_mean, np.sqrt(self.variance(X, K_trans))
+        else:
+            return y_mean
+
+    def variance(self, X, K_trans=None):
+        if K_trans is None:
+            K_trans = self.kernel_(X, self.X_train_)
+
+        if self._K_inv is None:
+            # compute inverse K_inv of K based on its Cholesky
+            # decomposition L and its inverse L_inv
+            L_inv = solve_triangular(self.L_.T,
+                                        np.eye(self.L_.shape[0]))
+            self._K_inv = L_inv.dot(L_inv.T)
+
+        # Compute variance of predictive distribution
+        y_var = self.kernel_.diag(X)
+        y_var -= np.einsum("ij,ij->i",
+                            np.dot(K_trans, self._K_inv), K_trans)
+
+        # Check if any of the variances is negative because of
+        # numerical issues. If yes: set the variance to 0.
+        y_var_negative = y_var < 0
+        if np.any(y_var_negative):
+            warnings.warn("Predicted variances smaller than 0. "
+                            "Setting those variances to 0.")
+            y_var[y_var_negative] = 0.0
+        return y_var
+
+    def evariance(self, X, K_trans=None, error_variance=False):
+
+        if self._vK_inv is None:
+
+            self._build_variance_weights()
+
+        if K_trans is None:
+            K_trans = self.kernel_(X, self.X_train_)
+
+        length_scale = self.kernel_.get_params()['k1__k2__length_scale']
+        derivative = rbf_derivative(
+            self.X_train_, 
+            X, 
+            weights=self.variance_alpha_,
+            K=K_trans,
+            length_scale=length_scale)
+        derivative_term = np.einsum("ij,ij->i", np.dot(derivative, self.x_variance), derivative)
+
+        # Compute variance of predictive distribution
+        y_var = self.kernel_.diag(X) + derivative_term
+        # print(K_trans.shape, self._vK_inv)
+        y_var -= np.einsum("ij,ij->i", np.dot(K_trans, self._vK_inv), K_trans)
+
+        # Check if any of the variances is negative because of
+        # numerical issues. If yes: set the variance to 0.
+        y_var_negative = y_var < 0
+        if np.any(y_var_negative):
+            warnings.warn("Predicted variances smaller than 0. "
+                          "Setting those variances to 0.")
+            y_var[y_var_negative] = 0.0
+        return y_var
+
+    def predict_noiseless(self, X, return_std=True, error_variance=False):
+
+        if return_std:
+            self.bias = np.sqrt(self.kernel_.k2.noise_level)
+            mean, std = self.predict(X, return_std=True, error_variance=error_variance)
+            std -= self.bias
+            return mean, std
+        else:
+            mean = self.predict(X, return_std=False, error_variance=error_variance)
+            return mean
+
+
+class EGP(BaseEstimator, RegressorMixin):
     """Gaussian process regression (GPR).
     The implementation is based on Algorithm 2.1 of Gaussian Processes
     for Machine Learning (GPML) by Rasmussen and Williams.
@@ -315,6 +495,17 @@ class NIGP(BaseEstimator, RegressorMixin):
             return y_mean, np.sqrt(self.variance(X, K_trans))
         else:
             return y_mean
+
+    def predict_noiseless(self, X, return_std=True):
+
+        if return_std:
+            self.bias = np.sqrt(self.kernel_.k2.noise_level)
+            mean, var = self.predict(X, return_std=True)
+            var -= self.bias
+            return mean, var
+        else:
+            mean = self.predict(X, return_std=False)
+            return mean
 
     def variance(self, X, K_trans=None):
 
