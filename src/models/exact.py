@@ -196,6 +196,8 @@ class GPRegressor(BaseEstimator, RegressorMixin):
                 return X_variance * np.identity(n_dims)
             elif X_variance.shape == n_dims:
                 return np.diag(X_variance)
+            elif X_variance.shape == (n_dims, n_dims):
+                return X_variance
             else:
                 raise ValueError(
                     f"Shape of 'X_variance' ({X_variance.shape}) "
