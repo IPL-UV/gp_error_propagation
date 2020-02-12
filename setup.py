@@ -7,11 +7,10 @@ setup(
     author="Juan Emmanuel Johnson",
     author_email="jemanjohnson34@gmail.com",
     install_requires=[
-        "numpy >= 1.16.0", 
+        "numpy >= 1.16.0",
         "scikit-learn >= 0.20.2",
-        "scipy >= 1.2.0", 
-        "matplotlib >= 3.0.0",
-        "numba >= 0.42.0"
+        "scipy >= 1.2.0",
+        "GPy",
     ],
-    long_description=open('README.md').read(),
+    long_description=open("README.md").read(),
 )
