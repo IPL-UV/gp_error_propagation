@@ -1,0 +1,22 @@
+name: 2019_egp
+channels:
+- defaults
+- conda-forge
+dependencies:
+- scipy
+- numpy
+- scikit-learn
+- matplotlib
+- pandas
+- numba
+- h5py
+- xarray
+- pytables
+- dask
+- cartopy
+# GP Libraries
+- pip:
+    - GPy
+    - tensorflow
+    - tensorflow_probability
+    - git+https://github.com/GPflow/GPflow.git@develop#egg=gpflow
